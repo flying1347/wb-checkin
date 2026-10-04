@@ -1,0 +1,29 @@
+name: wb-checkin
+
+on:
+  schedule:
+    # UTC 00:00 = 北京时间 08:00
+    - cron: "0 0 * * *"
+    # UTC 00:30 = 北京时间 08:30（双保险，函数幂等不会重复计分）
+    - cron: "30 0 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  checkin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Trigger Vercel checkin
+        env:
+          RUNKEY: ${{ secrets.RUNKEY }}
+        run: |
+          for i in 1 2 3; do
+            echo "== attempt $i =="
+            code=$(curl -sS -m 55 -o resp.json -w "%{http_code}" \
+              "https://wb-checkin.vercel.app/api/checkin?key=${RUNKEY}") || code="000"
+            echo "HTTP $code"
+            cat resp.json || true
+            if [ "$code" = "200" ]; then echo "OK"; exit 0; fi
+            sleep 10
+          done
+          echo "FAILED after retries"; exit 1
