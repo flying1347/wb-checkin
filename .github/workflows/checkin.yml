@@ -2,14 +2,29 @@ name: wb-checkin
 
 on:
   schedule:
-    # UTC 00:00 = 北京时间 08:00
-    - cron: "0 0 * * *"
-    # UTC 00:30 = 北京时间 08:30（双保险，函数幂等不会重复计分）
-    - cron: "30 0 * * *"
+    # 北京时间 08:00 起每 2 小时一次，共 8 次。
+    # GitHub 免费 runner 排队会延迟 3-7 小时，多点撒网保证当天必有一次命中。
+    # 签到接口幂等，重复触发只返回"今日已签到"，不会重复计分。
+    - cron: "0 0 * * *"    # 北京 08:00
+    - cron: "0 2 * * *"    # 北京 10:00
+    - cron: "0 4 * * *"    # 北京 12:00
+    - cron: "0 6 * * *"    # 北京 14:00
+    - cron: "0 8 * * *"    # 北京 16:00
+    - cron: "0 10 * * *"   # 北京 18:00
+    - cron: "0 12 * * *"   # 北京 20:00
+    - cron: "0 14 * * *"   # 北京 22:00
+    # 每月 1 号提交一次心跳。GitHub 规定公开仓库 60 天无 commit 会暂停 schedule，
+    # 这个 job 专门续命，别删。
+    - cron: "0 16 1 * *"
   workflow_dispatch: {}
+
+concurrency:
+  group: wb-checkin
+  cancel-in-progress: false
 
 jobs:
   checkin:
+    if: github.event.schedule != '0 16 1 * *'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -27,3 +42,20 @@ jobs:
             sleep 10
           done
           echo "FAILED after retries"; exit 1
+
+  heartbeat:
+    if: github.event.schedule == '0 16 1 * *'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Commit heartbeat to keep schedule alive
+        run: |
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > .heartbeat
+          git config user.name "wb-checkin-bot"
+          git config user.email "wb-checkin-bot@users.noreply.github.com"
+          git add .heartbeat
+          git commit -m "chore: heartbeat $(date -u +%Y-%m) keep schedule alive" || echo "no change"
+          git push
+
